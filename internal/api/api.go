@@ -97,6 +97,9 @@ func SetupApp(webFS embed.FS) *fiber.App {
 		api.Get("/emails/stream", authMiddleware(false), emailStream)
 		api.Get("/emails/:id", authMiddleware(false), getEmailDetail)
 		api.Delete("/emails/:id", authMiddleware(false), deleteEmail)
+		api.Delete("/emails/page", authMiddleware(false), deletePageEmails)
+		api.Delete("/emails/month/all", authMiddleware(false), deleteMonthEmails)
+		api.Delete("/emails/all", authMiddleware(false), deleteAllEmails)
 		api.Get("/attachments/:id", authMiddleware(false), getAttachment)
 
 		admin := api.Group("/admin")
@@ -281,12 +284,30 @@ func userLogin(c *fiber.Ctx) error {
 func getEmails(c *fiber.Ctx) error {
 	email := c.Locals("email").(string)
 
+	page, _ := strconv.Atoi(c.Query("page", "1"))
+	limit, _ := strconv.Atoi(c.Query("limit", "50"))
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 50
+	}
+	offset := (page - 1) * limit
+
+	var total int64
+	db.DB.Model(&model.Email{}).Where("to_addr = ?", email).Count(&total)
+
 	var emails []model.Email
-	if err := db.DB.Where("to_addr = ?", email).Select("id", "from_addr", "to_addr", "subject", "received_at").Order("received_at DESC").Find(&emails).Error; err != nil {
+	if err := db.DB.Where("to_addr = ?", email).Select("id", "from_addr", "to_addr", "subject", "received_at").Order("received_at DESC").Limit(limit).Offset(offset).Find(&emails).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "查询失败"})
 	}
 
-	return c.JSON(emails)
+	return c.JSON(fiber.Map{
+		"emails": emails,
+		"total":  total,
+		"page":   page,
+		"limit":  limit,
+	})
 }
 
 func getEmailDetail(c *fiber.Ctx) error {
@@ -345,6 +366,60 @@ func deleteEmail(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{"message": "删除成功"})
+}
+
+func deletePageEmails(c *fiber.Ctx) error {
+	email := c.Locals("email").(string)
+
+	page, _ := strconv.Atoi(c.Query("page", "1"))
+	limit, _ := strconv.Atoi(c.Query("limit", "50"))
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 50
+	}
+	offset := (page - 1) * limit
+
+	var emailIDs []uint
+	db.DB.Model(&model.Email{}).Where("to_addr = ?", email).Order("received_at DESC").Limit(limit).Offset(offset).Pluck("id", &emailIDs)
+
+	if len(emailIDs) == 0 {
+		return c.JSON(fiber.Map{"message": "没有邮件可删除", "count": 0})
+	}
+
+	result := db.DB.Where("id IN ? AND to_addr = ?", emailIDs, email).Delete(&model.Email{})
+	if result.Error != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "删除失败"})
+	}
+
+	return c.JSON(fiber.Map{"message": "删除成功", "count": result.RowsAffected})
+}
+
+func deleteMonthEmails(c *fiber.Ctx) error {
+	email := c.Locals("email").(string)
+
+	now := time.Now()
+	startOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+	endOfMonth := startOfMonth.AddDate(0, 1, 0)
+
+	result := db.DB.Where("to_addr = ? AND received_at >= ? AND received_at < ?", email, startOfMonth, endOfMonth).Delete(&model.Email{})
+	if result.Error != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "删除失败"})
+	}
+
+	return c.JSON(fiber.Map{"message": "删除成功", "count": result.RowsAffected})
+}
+
+func deleteAllEmails(c *fiber.Ctx) error {
+	email := c.Locals("email").(string)
+
+	result := db.DB.Where("to_addr = ?", email).Delete(&model.Email{})
+	if result.Error != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "删除失败"})
+	}
+
+	return c.JSON(fiber.Map{"message": "删除成功", "count": result.RowsAffected})
 }
 
 func getAttachment(c *fiber.Ctx) error {

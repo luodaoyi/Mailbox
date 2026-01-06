@@ -24,10 +24,13 @@ api.interceptors.response.use(
 
 export default {
   login: email => api.post('/login', { email }),
-  getEmails: () => api.get('/emails'),
+  getEmails: (page = 1, limit = 50) => api.get('/emails', { params: { page, limit } }),
   getEmail: id => api.get(`/emails/${id}`),
   getAttachment: id => `/api/attachments/${id}`,
   deleteEmail: id => api.delete(`/emails/${id}`),
+  deletePageEmails: (page, limit) => api.delete('/emails/page', { params: { page, limit } }),
+  deleteMonthEmails: () => api.delete('/emails/month/all'),
+  deleteAllEmails: () => api.delete('/emails/all'),
 
   adminLogin: (username, password) => api.post('/admin/login', { username, password }),
   getDomains: () => api.get('/admin/domains'),

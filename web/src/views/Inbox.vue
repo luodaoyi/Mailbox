@@ -2,17 +2,21 @@
   <div class="h-screen flex flex-col">
     <div class="bg-white border-b px-6 py-4 flex justify-between items-center">
       <h1 class="text-xl font-bold">收件箱 - {{ email }}</h1>
-      <div class="flex gap-4">
+      <div class="flex gap-2">
+        <button @click="deletePageEmails" class="px-3 py-2 text-sm bg-yellow-500 text-white rounded hover:bg-yellow-600">删除本页</button>
+        <button @click="deleteMonthEmails" class="px-3 py-2 text-sm bg-orange-500 text-white rounded hover:bg-orange-600">删除本月</button>
+        <button @click="deleteAllEmails" class="px-3 py-2 text-sm bg-red-500 text-white rounded hover:bg-red-600">删除全部</button>
         <router-link to="/admin" class="px-4 py-2 text-blue-600 hover:text-blue-800">管理后台</router-link>
         <button @click="logout" class="px-4 py-2 text-gray-600 hover:text-gray-800">退出</button>
       </div>
     </div>
     <div class="flex-1 flex overflow-hidden">
       <!-- 左侧邮件列表 -->
-      <div class="w-96 border-r bg-white overflow-y-auto">
-        <div v-if="loading" class="p-8 text-center text-gray-500">加载中...</div>
-        <div v-else-if="emails.length === 0" class="p-8 text-center text-gray-500">暂无邮件</div>
-        <div v-else>
+      <div class="w-96 border-r bg-white flex flex-col">
+        <div class="flex-1 overflow-y-auto">
+          <div v-if="loading" class="p-8 text-center text-gray-500">加载中...</div>
+          <div v-else-if="emails.length === 0" class="p-8 text-center text-gray-500">暂无邮件</div>
+          <div v-else>
           <div v-for="e in emails" :key="e.ID"
                :class="['p-4 border-b hover:bg-gray-50 flex justify-between items-start', selectedEmail?.ID === e.ID ? 'bg-blue-50' : '']">
             <div class="flex-1 cursor-pointer" @click="selectEmail(e)">
@@ -28,6 +32,12 @@
               </svg>
             </button>
           </div>
+        </div>
+        </div>
+        <div v-if="total > limit" class="border-t p-4 flex justify-between items-center">
+          <button @click="prevPage" :disabled="page === 1" class="px-3 py-1 bg-gray-200 rounded disabled:opacity-50">上一页</button>
+          <span class="text-sm text-gray-600">第 {{ page }} 页 / 共 {{ totalPages }} 页 (共 {{ total }} 封)</span>
+          <button @click="nextPage" :disabled="page >= totalPages" class="px-3 py-1 bg-gray-200 rounded disabled:opacity-50">下一页</button>
         </div>
       </div>
       <!-- 右侧邮件详情 -->
@@ -61,7 +71,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import api from '../api'
 
@@ -71,11 +81,30 @@ const email = ref('')
 const emails = ref([])
 const selectedEmail = ref(null)
 const loading = ref(true)
+const page = ref(1)
+const limit = ref(50)
+const total = ref(0)
 let eventSource = null
 let pollTimer = null
 
+const totalPages = computed(() => Math.ceil(total.value / limit.value))
+
 const formatTime = t => new Date(t).toLocaleString('zh-CN')
 const formatSize = s => s < 1024 ? s + 'B' : s < 1048576 ? (s / 1024).toFixed(1) + 'KB' : (s / 1048576).toFixed(1) + 'MB'
+
+const prevPage = () => {
+  if (page.value > 1) {
+    page.value--
+    loadEmails()
+  }
+}
+
+const nextPage = () => {
+  if (page.value < totalPages.value) {
+    page.value++
+    loadEmails()
+  }
+}
 
 const logout = () => {
   eventSource?.close()
@@ -96,7 +125,7 @@ const deleteEmail = async (id) => {
   if (!confirm('确定删除这封邮件吗？')) return
   try {
     await api.deleteEmail(id)
-    emails.value = emails.value.filter(e => e.ID !== id)
+    loadEmails()
     if (selectedEmail.value?.id === id) {
       selectedEmail.value = null
     }
@@ -107,12 +136,57 @@ const deleteEmail = async (id) => {
   }
 }
 
+const deletePageEmails = async () => {
+  if (!confirm(`确定删除本页所有邮件吗？(共 ${emails.value.length} 封)`)) return
+  try {
+    const res = await api.deletePageEmails(page.value, limit.value)
+    alert(`成功删除 ${res.count} 封邮件`)
+    loadEmails()
+    selectedEmail.value = null
+  } catch (err) {
+    console.error('删除失败:', err)
+    alert('删除失败: ' + (err.response?.data?.error || err.message))
+  }
+}
+
+const deleteMonthEmails = async () => {
+  if (!confirm('确定删除本月所有邮件吗？此操作不可恢复！')) return
+  try {
+    const res = await api.deleteMonthEmails()
+    alert(`成功删除 ${res.count} 封邮件`)
+    page.value = 1
+    loadEmails()
+    selectedEmail.value = null
+  } catch (err) {
+    console.error('删除失败:', err)
+    alert('删除失败: ' + (err.response?.data?.error || err.message))
+  }
+}
+
+const deleteAllEmails = async () => {
+  if (!confirm('确定删除所有邮件吗？此操作不可恢复！')) return
+  if (!confirm('再次确认：真的要删除所有邮件吗？')) return
+  try {
+    const res = await api.deleteAllEmails()
+    alert(`成功删除 ${res.count} 封邮件`)
+    page.value = 1
+    loadEmails()
+    selectedEmail.value = null
+  } catch (err) {
+    console.error('删除失败:', err)
+    alert('删除失败: ' + (err.response?.data?.error || err.message))
+  }
+}
+
 const loadEmails = async () => {
   try {
-    const data = await api.getEmails()
-    emails.value = data
+    const data = await api.getEmails(page.value, limit.value)
+    emails.value = data.emails || []
+    total.value = data.total || 0
   } catch (e) {
     console.error(e)
+    emails.value = []
+    total.value = 0
   }
 }
 
@@ -134,17 +208,10 @@ const connectSSE = () => {
 
 const startPolling = () => {
   pollTimer = setInterval(async () => {
-    try {
-      const data = await api.getEmails()
-      data.forEach(newEmail => {
-        if (!emails.value.find(e => e.ID === newEmail.ID)) {
-          emails.value.unshift(newEmail)
-        }
-      })
-    } catch (e) {
-      console.error('Polling error:', e)
+    if (page.value === 1) {
+      loadEmails()
     }
-  }, 30000)
+  }, 60000)
 }
 
 onMounted(async () => {
