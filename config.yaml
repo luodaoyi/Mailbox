@@ -1,0 +1,14 @@
+server:
+  http_port: 8080
+  smtp_port: 25
+
+database:
+  host: 192.168.11.5
+  port: 3306
+  user: root
+  password: "luodaoyi"
+  name: mailbox
+
+admin:
+  default_user: admin
+  default_pass: admin123

@@ -1,0 +1,10 @@
+[project]
+name = "mailbox-test"
+version = "0.1.0"
+description = "SMTP 测试脚本"
+requires-python = ">=3.10"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
