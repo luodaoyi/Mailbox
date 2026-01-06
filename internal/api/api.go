@@ -584,7 +584,19 @@ func deleteDomain(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "无效的ID"})
 	}
 
-	if err := db.DB.Delete(&model.Domain{}, idInt).Error; err != nil {
+	var domain model.Domain
+	if err := db.DB.First(&domain, idInt).Error; err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "域名不存在"})
+	}
+
+	// 检查该域名下是否有邮箱
+	var mailboxCount int64
+	db.DB.Model(&model.Mailbox{}).Where("domain = ?", domain.Domain).Count(&mailboxCount)
+	if mailboxCount > 0 {
+		return c.Status(400).JSON(fiber.Map{"error": fmt.Sprintf("该域名下还有 %d 个邮箱，请先删除所有邮箱后再删除域名", mailboxCount)})
+	}
+
+	if err := db.DB.Delete(&domain).Error; err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "删除失败"})
 	}
 
@@ -663,12 +675,11 @@ func deleteMailbox(c *fiber.Ctx) error {
 func deleteMailboxesByDomain(c *fiber.Ctx) error {
 	domain := c.Params("domain")
 
-	var mailboxes []model.Mailbox
-	if err := db.DB.Where("domain = ?", domain).Find(&mailboxes).Error; err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "查询邮箱失败"})
-	}
+	// 先统计数量
+	var mailboxCount int64
+	db.DB.Model(&model.Mailbox{}).Where("domain = ?", domain).Count(&mailboxCount)
 
-	if len(mailboxes) == 0 {
+	if mailboxCount == 0 {
 		return c.JSON(fiber.Map{
 			"message":       "没有邮箱需要删除",
 			"mailbox_count": 0,
@@ -676,25 +687,27 @@ func deleteMailboxesByDomain(c *fiber.Ctx) error {
 		})
 	}
 
-	var totalEmails int64 = 0
-	for _, mailbox := range mailboxes {
-		result := db.DB.Where("to_addr = ?", mailbox.Address).Delete(&model.Email{})
-		if result.Error != nil {
-			fmt.Printf("[API] 删除邮箱 %s 的邮件失败: %v\n", mailbox.Address, result.Error)
-			continue
-		}
-		totalEmails += result.RowsAffected
-	}
+	// 获取该域名下所有邮箱地址
+	var addresses []string
+	db.DB.Model(&model.Mailbox{}).Where("domain = ?", domain).Pluck("address", &addresses)
 
-	result := db.DB.Where("domain = ?", domain).Delete(&model.Mailbox{})
+	// 使用单个DELETE语句删除所有邮件
+	result := db.DB.Where("to_addr IN ?", addresses).Delete(&model.Email{})
+	if result.Error != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "删除邮件失败"})
+	}
+	emailCount := result.RowsAffected
+
+	// 使用单个DELETE语句删除所有邮箱记录
+	result = db.DB.Where("domain = ?", domain).Delete(&model.Mailbox{})
 	if result.Error != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "删除邮箱记录失败"})
 	}
 
-	fmt.Printf("[API] 删除域名 %s 下的 %d 个邮箱，共删除 %d 封邮件\n", domain, len(mailboxes), totalEmails)
+	fmt.Printf("[API] 删除域名 %s 下的 %d 个邮箱，共删除 %d 封邮件\n", domain, mailboxCount, emailCount)
 	return c.JSON(fiber.Map{
 		"message":       "删除成功",
-		"mailbox_count": len(mailboxes),
-		"email_count":   totalEmails,
+		"mailbox_count": mailboxCount,
+		"email_count":   emailCount,
 	})
 }
