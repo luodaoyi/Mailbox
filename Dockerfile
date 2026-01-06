@@ -9,7 +9,7 @@ COPY web/ ./
 RUN pnpm run build
 
 # 阶段 2: Go 编译
-FROM golang:1.21-alpine AS go-builder
+FROM golang:1.23-alpine AS go-builder
 WORKDIR /app
 # 安装构建依赖
 RUN apk add --no-cache git
