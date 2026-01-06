@@ -1,0 +1,50 @@
+# Git
+.git
+.gitignore
+
+# Node
+node_modules
+web/node_modules
+npm-debug.log
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+vendor/
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+dist
+build
+*.log
+
+# Docker
+.dockerignore
+Dockerfile
+docker-compose.yml
+
+# CI/CD
+.github
+
+# Test files
+*_test.go
+test_*.py
+pyproject.toml
+
+# Documentation
+README*.md

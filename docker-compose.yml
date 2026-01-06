@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  mailbox:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+      - "25:25"
+    environment:
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=mailbox
+      - DB_PASSWORD=mailbox123
+      - DB_NAME=mailbox
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=admin123
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - mailbox-network
+
+  mysql:
+    image: mysql:8.0
+    environment:
+      - MYSQL_ROOT_PASSWORD=root123
+      - MYSQL_DATABASE=mailbox
+      - MYSQL_USER=mailbox
+      - MYSQL_PASSWORD=mailbox123
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 5s
+      retries: 10
+    networks:
+      - mailbox-network
+
+networks:
+  mailbox-network:
+    driver: bridge
+
+volumes:
+  mysql_data:

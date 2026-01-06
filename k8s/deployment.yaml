@@ -1,0 +1,216 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mailbox
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mailbox-config
+  namespace: mailbox
+data:
+  DB_HOST: "mysql"
+  DB_PORT: "3306"
+  DB_USER: "mailbox"
+  DB_NAME: "mailbox"
+  ADMIN_USERNAME: "admin"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mailbox-secret
+  namespace: mailbox
+type: Opaque
+stringData:
+  DB_PASSWORD: "mailbox123"
+  ADMIN_PASSWORD: "admin123"
+  MYSQL_ROOT_PASSWORD: "root123"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-pvc
+  namespace: mailbox
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql
+  namespace: mailbox
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+      - name: mysql
+        image: mysql:8.0
+        ports:
+        - containerPort: 3306
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mailbox-secret
+              key: MYSQL_ROOT_PASSWORD
+        - name: MYSQL_DATABASE
+          value: "mailbox"
+        - name: MYSQL_USER
+          valueFrom:
+            configMapKeyRef:
+              name: mailbox-config
+              key: DB_USER
+        - name: MYSQL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mailbox-secret
+              key: DB_PASSWORD
+        volumeMounts:
+        - name: mysql-storage
+          mountPath: /var/lib/mysql
+        livenessProbe:
+          exec:
+            command:
+            - mysqladmin
+            - ping
+            - -h
+            - localhost
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          exec:
+            command:
+            - mysqladmin
+            - ping
+            - -h
+            - localhost
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: mysql-storage
+        persistentVolumeClaim:
+          claimName: mysql-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  namespace: mailbox
+spec:
+  selector:
+    app: mysql
+  ports:
+  - port: 3306
+    targetPort: 3306
+  clusterIP: None
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mailbox
+  namespace: mailbox
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mailbox
+  template:
+    metadata:
+      labels:
+        app: mailbox
+    spec:
+      containers:
+      - name: mailbox
+        image: <your-dockerhub-username>/mailbox:latest
+        ports:
+        - containerPort: 8080
+          name: http
+        - containerPort: 25
+          name: smtp
+        envFrom:
+        - configMapRef:
+            name: mailbox-config
+        env:
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mailbox-secret
+              key: DB_PASSWORD
+        - name: ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mailbox-secret
+              key: ADMIN_PASSWORD
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mailbox
+  namespace: mailbox
+spec:
+  selector:
+    app: mailbox
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+  - name: smtp
+    port: 25
+    targetPort: 25
+  type: LoadBalancer
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: mailbox-hpa
+  namespace: mailbox
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: mailbox
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80

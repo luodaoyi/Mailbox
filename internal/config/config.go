@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strconv"
 
 	"gopkg.in/yaml.v3"
 )
@@ -39,6 +40,31 @@ func Load(path string) (*Config, error) {
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
+	}
+
+	// 环境变量覆盖配置
+	if host := os.Getenv("DB_HOST"); host != "" {
+		cfg.Database.Host = host
+	}
+	if port := os.Getenv("DB_PORT"); port != "" {
+		if p, err := strconv.Atoi(port); err == nil {
+			cfg.Database.Port = p
+		}
+	}
+	if user := os.Getenv("DB_USER"); user != "" {
+		cfg.Database.User = user
+	}
+	if password := os.Getenv("DB_PASSWORD"); password != "" {
+		cfg.Database.Password = password
+	}
+	if name := os.Getenv("DB_NAME"); name != "" {
+		cfg.Database.Name = name
+	}
+	if adminUser := os.Getenv("ADMIN_USERNAME"); adminUser != "" {
+		cfg.Admin.DefaultUser = adminUser
+	}
+	if adminPass := os.Getenv("ADMIN_PASSWORD"); adminPass != "" {
+		cfg.Admin.DefaultPass = adminPass
 	}
 
 	return &cfg, nil
