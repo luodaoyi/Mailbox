@@ -6,7 +6,7 @@
         <button @click="deletePageEmails" class="px-3 py-2 text-sm bg-yellow-500 text-white rounded hover:bg-yellow-600">删除本页</button>
         <button @click="deleteMonthEmails" class="px-3 py-2 text-sm bg-orange-500 text-white rounded hover:bg-orange-600">删除本月</button>
         <button @click="deleteAllEmails" class="px-3 py-2 text-sm bg-red-500 text-white rounded hover:bg-red-600">删除全部</button>
-        <router-link to="/admin" class="px-4 py-2 text-blue-600 hover:text-blue-800">管理后台</router-link>
+        <router-link to="/admin/domains" class="px-4 py-2 text-blue-600 hover:text-blue-800">管理后台</router-link>
         <button @click="logout" class="px-4 py-2 text-gray-600 hover:text-gray-800">退出</button>
       </div>
     </div>

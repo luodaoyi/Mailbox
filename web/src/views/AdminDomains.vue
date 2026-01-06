@@ -3,7 +3,6 @@
     <div class="flex justify-between items-center mb-6">
       <h1 class="text-2xl font-bold">管理后台</h1>
       <div class="flex gap-4">
-        <router-link to="/inbox" class="px-4 py-2 text-blue-600 hover:text-blue-800">邮件列表</router-link>
         <button @click="logout" class="px-4 py-2 text-gray-600 hover:text-gray-800">退出</button>
       </div>
     </div>
