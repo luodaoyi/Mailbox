@@ -94,14 +94,14 @@ func SetupApp(webFS embed.FS) *fiber.App {
 	api := app.Group("/api")
 	{
 		api.Post("/login", userLogin)
-		api.Get("/emails", authMiddleware(false), getEmails)
-		api.Get("/emails/stream", authMiddleware(false), emailStream)
-		api.Delete("/emails/page", authMiddleware(false), deletePageEmails)
-		api.Delete("/emails/month/all", authMiddleware(false), deleteMonthEmails)
-		api.Delete("/emails/all", authMiddleware(false), deleteAllEmails)
-		api.Get("/emails/:id", authMiddleware(false), getEmailDetail)
-		api.Delete("/emails/:id", authMiddleware(false), deleteEmail)
-		api.Get("/attachments/:id", authMiddleware(false), getAttachment)
+		api.Get("/emails", getEmails)
+		api.Get("/emails/stream", emailStream)
+		api.Delete("/emails/page", deletePageEmails)
+		api.Delete("/emails/month/all", deleteMonthEmails)
+		api.Delete("/emails/all", deleteAllEmails)
+		api.Get("/emails/:id", getEmailDetail)
+		api.Delete("/emails/:id", deleteEmail)
+		api.Get("/attachments/:id", getAttachment)
 
 		admin := api.Group("/admin")
 		{
@@ -110,6 +110,7 @@ func SetupApp(webFS embed.FS) *fiber.App {
 			admin.Post("/domains", authMiddleware(true), createDomain)
 			admin.Put("/domains/:id", authMiddleware(true), updateDomain)
 			admin.Delete("/domains/:id", authMiddleware(true), deleteDomain)
+			admin.Get("/mailboxes", authMiddleware(true), getMailboxes)
 		}
 	}
 
@@ -193,7 +194,10 @@ func authMiddleware(requireAdmin bool) fiber.Handler {
 }
 
 func emailStream(c *fiber.Ctx) error {
-	email := c.Locals("email").(string)
+	email := c.Query("email")
+	if email == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "email parameter required"})
+	}
 	fmt.Printf("[SSE] 新的 SSE 连接请求: %s\n", email)
 
 	c.Set("Content-Type", "text/event-stream")
@@ -283,7 +287,10 @@ func userLogin(c *fiber.Ctx) error {
 }
 
 func getEmails(c *fiber.Ctx) error {
-	email := c.Locals("email").(string)
+	email := c.Query("email")
+	if email == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "email parameter required"})
+	}
 
 	page, _ := strconv.Atoi(c.Query("page", "1"))
 	limit, _ := strconv.Atoi(c.Query("limit", "50"))
@@ -312,7 +319,10 @@ func getEmails(c *fiber.Ctx) error {
 }
 
 func getEmailDetail(c *fiber.Ctx) error {
-	email := c.Locals("email").(string)
+	email := c.Query("email")
+	if email == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "email parameter required"})
+	}
 	id := c.Params("id")
 
 	var emailData model.Email
@@ -351,8 +361,29 @@ func getEmailDetail(c *fiber.Ctx) error {
 	})
 }
 
+func cleanupMailbox(email string) {
+	var count int64
+	db.DB.Model(&model.Email{}).Where("to_addr = ?", email).Count(&count)
+	if count == 0 {
+		db.DB.Where("address = ?", email).Delete(&model.Mailbox{})
+	} else {
+		var mailbox model.Mailbox
+		if err := db.DB.Where("address = ?", email).First(&mailbox).Error; err == nil {
+			var lastEmail model.Email
+			db.DB.Where("to_addr = ?", email).Order("received_at DESC").First(&lastEmail)
+			db.DB.Model(&mailbox).Updates(map[string]interface{}{
+				"email_count": count,
+				"last_email":  lastEmail.ReceivedAt,
+			})
+		}
+	}
+}
+
 func deleteEmail(c *fiber.Ctx) error {
-	email := c.Locals("email").(string)
+	email := c.Query("email")
+	if email == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "email parameter required"})
+	}
 	id := c.Params("id")
 
 	idInt, err := strconv.Atoi(id)
@@ -368,11 +399,15 @@ func deleteEmail(c *fiber.Ctx) error {
 		return c.Status(404).JSON(fiber.Map{"error": "邮件不存在"})
 	}
 
+	cleanupMailbox(email)
 	return c.JSON(fiber.Map{"message": "删除成功"})
 }
 
 func deletePageEmails(c *fiber.Ctx) error {
-	email := c.Locals("email").(string)
+	email := c.Query("email")
+	if email == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "email parameter required"})
+	}
 
 	page, _ := strconv.Atoi(c.Query("page", "1"))
 	limit, _ := strconv.Atoi(c.Query("limit", "50"))
@@ -398,11 +433,15 @@ func deletePageEmails(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": "删除失败: " + result.Error.Error()})
 	}
 
+	cleanupMailbox(email)
 	return c.JSON(fiber.Map{"message": "删除成功", "count": result.RowsAffected})
 }
 
 func deleteMonthEmails(c *fiber.Ctx) error {
-	email := c.Locals("email").(string)
+	email := c.Query("email")
+	if email == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "email parameter required"})
+	}
 
 	now := time.Now()
 	startOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
@@ -413,22 +452,30 @@ func deleteMonthEmails(c *fiber.Ctx) error {
 		return c.Status(500).JSON(fiber.Map{"error": "删除失败"})
 	}
 
+	cleanupMailbox(email)
 	return c.JSON(fiber.Map{"message": "删除成功", "count": result.RowsAffected})
 }
 
 func deleteAllEmails(c *fiber.Ctx) error {
-	email := c.Locals("email").(string)
+	email := c.Query("email")
+	if email == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "email parameter required"})
+	}
 
 	result := db.DB.Where("to_addr = ?", email).Delete(&model.Email{})
 	if result.Error != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "删除失败"})
 	}
 
+	cleanupMailbox(email)
 	return c.JSON(fiber.Map{"message": "删除成功", "count": result.RowsAffected})
 }
 
 func getAttachment(c *fiber.Ctx) error {
-	email := c.Locals("email").(string)
+	email := c.Query("email")
+	if email == "" {
+		return c.Status(400).JSON(fiber.Map{"error": "email parameter required"})
+	}
 	id := c.Params("id")
 
 	var att model.Attachment
@@ -540,6 +587,16 @@ func deleteDomain(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{"message": "删除成功"})
+}
+
+func getMailboxes(c *fiber.Ctx) error {
+	var mailboxes []model.Mailbox
+	if err := db.DB.Order("last_email DESC").Find(&mailboxes).Error; err != nil {
+		fmt.Printf("[API] 查询邮箱列表失败: %v\n", err)
+		return c.Status(500).JSON(fiber.Map{"error": "查询失败"})
+	}
+	fmt.Printf("[API] 查询到 %d 个邮箱\n", len(mailboxes))
+	return c.JSON(mailboxes)
 }
 
 // GetSSEManager 返回全局 SSE 管理器，供 SMTP 服务器调用

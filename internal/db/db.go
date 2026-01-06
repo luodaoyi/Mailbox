@@ -23,7 +23,7 @@ func Init(cfg *config.DatabaseConfig, adminCfg *config.AdminConfig) error {
 
 	DB = db
 
-	if err := db.AutoMigrate(&model.Domain{}, &model.Email{}, &model.Attachment{}, &model.Admin{}); err != nil {
+	if err := db.AutoMigrate(&model.Domain{}, &model.Email{}, &model.Attachment{}, &model.Admin{}, &model.Mailbox{}); err != nil {
 		return err
 	}
 

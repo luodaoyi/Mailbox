@@ -64,7 +64,7 @@
           <div v-if="selectedEmail.attachments?.length" class="mb-4 p-3 bg-gray-50 rounded">
             <div class="font-medium mb-2">附件 ({{ selectedEmail.attachments.length }}):</div>
             <div v-for="a in selectedEmail.attachments" :key="a.id" class="text-sm">
-              <a :href="api.getAttachment(a.id)" target="_blank" class="text-blue-500 hover:underline">
+              <a :href="api.getAttachment(email, a.id)" target="_blank" class="text-blue-500 hover:underline">
                 {{ a.filename }} ({{ formatSize(a.size) }})
               </a>
             </div>
@@ -121,14 +121,13 @@ const nextPage = () => {
 const logout = () => {
   eventSource?.close()
   if (pollTimer) clearInterval(pollTimer)
-  localStorage.removeItem('token')
   router.push('/')
 }
 
 const selectEmail = async (e) => {
   detailLoading.value = true
   try {
-    selectedEmail.value = await api.getEmail(e.ID)
+    selectedEmail.value = await api.getEmail(email.value, e.ID)
   } catch (err) {
     console.error(err)
   } finally {
@@ -139,7 +138,7 @@ const selectEmail = async (e) => {
 const deleteEmail = async (id) => {
   if (!confirm('确定删除这封邮件吗？')) return
   try {
-    await api.deleteEmail(id)
+    await api.deleteEmail(email.value, id)
     loadEmails()
     if (selectedEmail.value?.id === id) {
       selectedEmail.value = null
@@ -154,7 +153,7 @@ const deleteEmail = async (id) => {
 const deletePageEmails = async () => {
   if (!confirm(`确定删除本页所有邮件吗？(共 ${emails.value.length} 封)`)) return
   try {
-    const res = await api.deletePageEmails(page.value, limit.value)
+    const res = await api.deletePageEmails(email.value, page.value, limit.value)
     alert(`成功删除 ${res.count} 封邮件`)
     loadEmails()
     selectedEmail.value = null
@@ -167,7 +166,7 @@ const deletePageEmails = async () => {
 const deleteMonthEmails = async () => {
   if (!confirm('确定删除本月所有邮件吗？此操作不可恢复！')) return
   try {
-    const res = await api.deleteMonthEmails()
+    const res = await api.deleteMonthEmails(email.value)
     alert(`成功删除 ${res.count} 封邮件`)
     page.value = 1
     loadEmails()
@@ -182,7 +181,7 @@ const deleteAllEmails = async () => {
   if (!confirm('确定删除所有邮件吗？此操作不可恢复！')) return
   if (!confirm('再次确认：真的要删除所有邮件吗？')) return
   try {
-    const res = await api.deleteAllEmails()
+    const res = await api.deleteAllEmails(email.value)
     alert(`成功删除 ${res.count} 封邮件`)
     page.value = 1
     loadEmails()
@@ -195,7 +194,7 @@ const deleteAllEmails = async () => {
 
 const loadEmails = async () => {
   try {
-    const data = await api.getEmails(page.value, limit.value)
+    const data = await api.getEmails(email.value, page.value, limit.value)
     emails.value = data.emails || []
     total.value = data.total || 0
   } catch (e) {
@@ -208,9 +207,7 @@ const loadEmails = async () => {
 }
 
 const connectSSE = () => {
-  const token = localStorage.getItem('token')
-  if (!token) return
-  eventSource = new EventSource(`/api/emails/stream?token=${token}`)
+  eventSource = new EventSource(`/api/emails/stream?email=${encodeURIComponent(email.value)}`)
   eventSource.onmessage = e => {
     const newEmail = JSON.parse(e.data)
     if (!emails.value.find(em => em.ID === newEmail.ID)) {
@@ -236,19 +233,6 @@ onMounted(async () => {
   if (!email.value) {
     router.push('/')
     return
-  }
-
-  let token = localStorage.getItem('token')
-  if (!token) {
-    try {
-      const res = await api.login(email.value)
-      token = res.token
-      localStorage.setItem('token', token)
-    } catch (err) {
-      console.error('自动登录失败:', err)
-      router.push('/')
-      return
-    }
   }
 
   await loadEmails()

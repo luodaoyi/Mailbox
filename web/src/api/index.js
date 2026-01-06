@@ -3,8 +3,12 @@ import axios from 'axios'
 const api = axios.create({ baseURL: '/api' })
 
 api.interceptors.request.use(config => {
-  const token = localStorage.getItem('token')
-  if (token) config.headers.Authorization = `Bearer ${token}`
+  // 只为管理后台 API 添加 token
+  const isAdmin = config.url.startsWith('/admin')
+  if (isAdmin) {
+    const token = localStorage.getItem('adminToken')
+    if (token) config.headers.Authorization = `Bearer ${token}`
+  }
   return config
 })
 
@@ -12,10 +16,16 @@ api.interceptors.response.use(
   res => res.data,
   err => {
     if (err.response?.status === 401) {
-      const token = localStorage.getItem('token')
+      const isAdmin = err.config.url.startsWith('/admin')
+      const tokenKey = isAdmin ? 'adminToken' : 'userToken'
+      const token = localStorage.getItem(tokenKey)
       if (token) {
-        localStorage.removeItem('token')
-        location.href = '/'
+        localStorage.removeItem(tokenKey)
+        if (isAdmin) {
+          location.href = '/admin'
+        } else {
+          location.href = '/'
+        }
       }
     }
     return Promise.reject(err)
@@ -24,17 +34,18 @@ api.interceptors.response.use(
 
 export default {
   login: email => api.post('/login', { email }),
-  getEmails: (page = 1, limit = 50) => api.get('/emails', { params: { page, limit } }),
-  getEmail: id => api.get(`/emails/${id}`),
-  getAttachment: id => `/api/attachments/${id}`,
-  deleteEmail: id => api.delete(`/emails/${id}`),
-  deletePageEmails: (page, limit) => api.delete('/emails/page', { params: { page, limit } }),
-  deleteMonthEmails: () => api.delete('/emails/month/all'),
-  deleteAllEmails: () => api.delete('/emails/all'),
+  getEmails: (email, page = 1, limit = 50) => api.get('/emails', { params: { email, page, limit } }),
+  getEmail: (email, id) => api.get(`/emails/${id}`, { params: { email } }),
+  getAttachment: (email, id) => `/api/attachments/${id}?email=${encodeURIComponent(email)}`,
+  deleteEmail: (email, id) => api.delete(`/emails/${id}`, { params: { email } }),
+  deletePageEmails: (email, page, limit) => api.delete('/emails/page', { params: { email, page, limit } }),
+  deleteMonthEmails: (email) => api.delete('/emails/month/all', { params: { email } }),
+  deleteAllEmails: (email) => api.delete('/emails/all', { params: { email } }),
 
   adminLogin: (username, password) => api.post('/admin/login', { username, password }),
   getDomains: () => api.get('/admin/domains'),
   addDomain: domain => api.post('/admin/domains', { domain, enabled: true }),
   updateDomain: (id, enabled) => api.put(`/admin/domains/${id}`, { enabled }),
-  deleteDomain: id => api.delete(`/admin/domains/${id}`)
+  deleteDomain: id => api.delete(`/admin/domains/${id}`),
+  getMailboxes: () => api.get('/admin/mailboxes')
 }

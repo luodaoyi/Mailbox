@@ -36,7 +36,7 @@ const handleLogin = async () => {
   error.value = ''
   try {
     const res = await api.adminLogin(username.value, password.value)
-    localStorage.setItem('token', res.token)
+    localStorage.setItem('adminToken', res.token)
     router.push('/admin/domains')
   } catch (e) {
     error.value = '用户名或密码错误'

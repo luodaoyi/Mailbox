@@ -32,18 +32,10 @@ const handleLogin = async () => {
   loading.value = true
   error.value = ''
   try {
-    const res = await api.login(email.value)
-    localStorage.setItem('token', res.token)
+    // 直接跳转，不需要登录
     router.push(`/inbox?email=${encodeURIComponent(email.value)}`)
   } catch (e) {
-    const errMsg = e.response?.data?.error || ''
-    if (errMsg.includes('域名未启用')) {
-      error.value = '该域名未启用，请联系管理员'
-    } else if (errMsg.includes('无效的邮箱')) {
-      error.value = '邮箱地址格式不正确'
-    } else {
-      error.value = errMsg || '登录失败，请检查邮箱地址'
-    }
+    error.value = '邮箱地址格式不正确'
   } finally {
     loading.value = false
   }

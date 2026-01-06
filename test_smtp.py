@@ -14,7 +14,7 @@ def send_test_email(index=1):
 
     # 邮件配置
     sender = "sender@example.com"
-    recipient = "test@cc.com"
+    recipient = "test1@cc.com"
     subject = f"测试邮件 #{index} - SMTP Test"
 
     # 创建邮件

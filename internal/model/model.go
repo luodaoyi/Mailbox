@@ -36,3 +36,12 @@ type Admin struct {
 	Password  string    `gorm:"type:varchar(255);not null"`
 	CreatedAt time.Time `gorm:"autoCreateTime"`
 }
+
+type Mailbox struct {
+	ID         uint      `gorm:"primaryKey"`
+	Address    string    `gorm:"type:varchar(255);uniqueIndex;not null"`
+	Domain     string    `gorm:"type:varchar(255);index;not null"`
+	EmailCount int       `gorm:"default:0"`
+	LastEmail  time.Time `gorm:"index"`
+	CreatedAt  time.Time `gorm:"autoCreateTime"`
+}

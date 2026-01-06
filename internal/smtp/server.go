@@ -73,6 +73,34 @@ func (s *Session) Data(r io.Reader) error {
 			return err
 		}
 
+		domain := strings.Split(to, "@")
+		if len(domain) == 2 {
+			var mailbox model.Mailbox
+			result := db.DB.Where("address = ?", to).FirstOrCreate(&mailbox, model.Mailbox{
+				Address:    to,
+				Domain:     domain[1],
+				EmailCount: 0,
+				LastEmail:  email.ReceivedAt,
+			})
+			if result.Error != nil && !strings.Contains(result.Error.Error(), "Duplicate entry") {
+				fmt.Printf("[Mailbox] 创建/查找邮箱失败: %v\n", result.Error)
+			} else {
+				fmt.Printf("[Mailbox] 邮箱记录: %s (ID: %d)\n", mailbox.Address, mailbox.ID)
+			}
+
+			var count int64
+			db.DB.Model(&model.Email{}).Where("to_addr = ?", to).Count(&count)
+			updateResult := db.DB.Model(&model.Mailbox{}).Where("address = ?", to).Updates(map[string]interface{}{
+				"email_count": int(count),
+				"last_email":  email.ReceivedAt,
+			})
+			if updateResult.Error != nil {
+				fmt.Printf("[Mailbox] 更新邮箱统计失败: %v\n", updateResult.Error)
+			} else {
+				fmt.Printf("[Mailbox] 更新成功: 邮件数=%d\n", count)
+			}
+		}
+
 		for _, att := range env.Attachments {
 			attachment := &model.Attachment{
 				EmailID:     email.ID,
