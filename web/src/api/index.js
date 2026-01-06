@@ -47,5 +47,7 @@ export default {
   addDomain: domain => api.post('/admin/domains', { domain, enabled: true }),
   updateDomain: (id, enabled) => api.put(`/admin/domains/${id}`, { enabled }),
   deleteDomain: id => api.delete(`/admin/domains/${id}`),
-  getMailboxes: () => api.get('/admin/mailboxes')
+  getMailboxes: (domain = '', page = 1, limit = 50) => api.get('/admin/mailboxes', { params: { domain, page, limit } }),
+  deleteMailbox: id => api.delete(`/admin/mailboxes/${id}`),
+  deleteMailboxesByDomain: domain => api.delete(`/admin/mailboxes/domain/${domain}`)
 }

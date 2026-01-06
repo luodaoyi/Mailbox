@@ -76,6 +76,38 @@
         </div>
       </div>
     </div>
+
+    <!-- 确认对话框 -->
+    <div v-if="confirmDialog.show" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+        <h3 class="text-xl font-bold mb-4">{{ confirmDialog.title }}</h3>
+        <p class="text-gray-700 whitespace-pre-line mb-6">{{ confirmDialog.message }}</p>
+        <div class="flex gap-3 justify-end">
+          <button @click="confirmDialog.show = false"
+                  class="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300">
+            取消
+          </button>
+          <button @click="confirmDialog.onConfirm"
+                  class="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600">
+            确认
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 消息对话框 -->
+    <div v-if="messageDialog.show" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div class="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+        <h3 class="text-xl font-bold mb-4">{{ messageDialog.title }}</h3>
+        <p class="text-gray-700 whitespace-pre-line mb-6">{{ messageDialog.message }}</p>
+        <div class="flex justify-end">
+          <button @click="messageDialog.show = false"
+                  class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
+            确定
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -96,6 +128,39 @@ const limit = ref(50)
 const total = ref(0)
 let eventSource = null
 let pollTimer = null
+
+const confirmDialog = ref({
+  show: false,
+  title: '',
+  message: '',
+  onConfirm: () => {}
+})
+
+const messageDialog = ref({
+  show: false,
+  title: '',
+  message: ''
+})
+
+const showConfirm = (title, message, onConfirm) => {
+  confirmDialog.value = {
+    show: true,
+    title,
+    message,
+    onConfirm: () => {
+      confirmDialog.value.show = false
+      onConfirm()
+    }
+  }
+}
+
+const showMessage = (title, message) => {
+  messageDialog.value = {
+    show: true,
+    title,
+    message
+  }
+}
 
 const totalPages = computed(() => Math.ceil(total.value / limit.value))
 
@@ -136,60 +201,79 @@ const selectEmail = async (e) => {
 }
 
 const deleteEmail = async (id) => {
-  if (!confirm('确定删除这封邮件吗？')) return
-  try {
-    await api.deleteEmail(email.value, id)
-    loadEmails()
-    if (selectedEmail.value?.id === id) {
-      selectedEmail.value = null
+  showConfirm(
+    '确认删除',
+    '确定删除这封邮件吗？',
+    async () => {
+      try {
+        await api.deleteEmail(email.value, id)
+        loadEmails()
+        if (selectedEmail.value?.id === id) {
+          selectedEmail.value = null
+        }
+      } catch (err) {
+        console.error('删除邮件失败:', err)
+        console.error('错误详情:', err.response?.data)
+        showMessage('删除失败', err.response?.data?.error || err.message)
+      }
     }
-  } catch (err) {
-    console.error('删除邮件失败:', err)
-    console.error('错误详情:', err.response?.data)
-    alert('删除失败: ' + (err.response?.data?.error || err.message))
-  }
+  )
 }
 
 const deletePageEmails = async () => {
-  if (!confirm(`确定删除本页所有邮件吗？(共 ${emails.value.length} 封)`)) return
-  try {
-    const res = await api.deletePageEmails(email.value, page.value, limit.value)
-    alert(`成功删除 ${res.count} 封邮件`)
-    loadEmails()
-    selectedEmail.value = null
-  } catch (err) {
-    console.error('删除失败:', err)
-    alert('删除失败: ' + (err.response?.data?.error || err.message))
-  }
+  showConfirm(
+    '确认删除',
+    `确定删除本页所有邮件吗？(共 ${emails.value.length} 封)`,
+    async () => {
+      try {
+        const res = await api.deletePageEmails(email.value, page.value, limit.value)
+        showMessage('删除成功', `成功删除 ${res.count} 封邮件`)
+        loadEmails()
+        selectedEmail.value = null
+      } catch (err) {
+        console.error('删除失败:', err)
+        showMessage('删除失败', err.response?.data?.error || err.message)
+      }
+    }
+  )
 }
 
 const deleteMonthEmails = async () => {
-  if (!confirm('确定删除本月所有邮件吗？此操作不可恢复！')) return
-  try {
-    const res = await api.deleteMonthEmails(email.value)
-    alert(`成功删除 ${res.count} 封邮件`)
-    page.value = 1
-    loadEmails()
-    selectedEmail.value = null
-  } catch (err) {
-    console.error('删除失败:', err)
-    alert('删除失败: ' + (err.response?.data?.error || err.message))
-  }
+  showConfirm(
+    '确认删除',
+    '确定删除本月所有邮件吗？此操作不可恢复！',
+    async () => {
+      try {
+        const res = await api.deleteMonthEmails(email.value)
+        showMessage('删除成功', `成功删除 ${res.count} 封邮件`)
+        page.value = 1
+        loadEmails()
+        selectedEmail.value = null
+      } catch (err) {
+        console.error('删除失败:', err)
+        showMessage('删除失败', err.response?.data?.error || err.message)
+      }
+    }
+  )
 }
 
 const deleteAllEmails = async () => {
-  if (!confirm('确定删除所有邮件吗？此操作不可恢复！')) return
-  if (!confirm('再次确认：真的要删除所有邮件吗？')) return
-  try {
-    const res = await api.deleteAllEmails(email.value)
-    alert(`成功删除 ${res.count} 封邮件`)
-    page.value = 1
-    loadEmails()
-    selectedEmail.value = null
-  } catch (err) {
-    console.error('删除失败:', err)
-    alert('删除失败: ' + (err.response?.data?.error || err.message))
-  }
+  showConfirm(
+    '确认删除所有',
+    '确定删除所有邮件吗？此操作不可恢复！\n\n请再次确认此操作。',
+    async () => {
+      try {
+        const res = await api.deleteAllEmails(email.value)
+        showMessage('删除成功', `成功删除 ${res.count} 封邮件`)
+        page.value = 1
+        loadEmails()
+        selectedEmail.value = null
+      } catch (err) {
+        console.error('删除失败:', err)
+        showMessage('删除失败', err.response?.data?.error || err.message)
+      }
+    }
+  )
 }
 
 const loadEmails = async () => {

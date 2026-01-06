@@ -111,6 +111,8 @@ func SetupApp(webFS embed.FS) *fiber.App {
 			admin.Put("/domains/:id", authMiddleware(true), updateDomain)
 			admin.Delete("/domains/:id", authMiddleware(true), deleteDomain)
 			admin.Get("/mailboxes", authMiddleware(true), getMailboxes)
+			admin.Delete("/mailboxes/:id", authMiddleware(true), deleteMailbox)
+			admin.Delete("/mailboxes/domain/:domain", authMiddleware(true), deleteMailboxesByDomain)
 		}
 	}
 
@@ -590,16 +592,109 @@ func deleteDomain(c *fiber.Ctx) error {
 }
 
 func getMailboxes(c *fiber.Ctx) error {
+	domain := c.Query("domain")
+	page, _ := strconv.Atoi(c.Query("page", "1"))
+	limit, _ := strconv.Atoi(c.Query("limit", "50"))
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 50
+	}
+	offset := (page - 1) * limit
+
+	query := db.DB.Model(&model.Mailbox{})
+	if domain != "" {
+		query = query.Where("domain = ?", domain)
+	}
+
+	var total int64
+	query.Count(&total)
+
 	var mailboxes []model.Mailbox
-	if err := db.DB.Order("last_email DESC").Find(&mailboxes).Error; err != nil {
+	if err := query.Order("last_email DESC").Limit(limit).Offset(offset).Find(&mailboxes).Error; err != nil {
 		fmt.Printf("[API] 查询邮箱列表失败: %v\n", err)
 		return c.Status(500).JSON(fiber.Map{"error": "查询失败"})
 	}
-	fmt.Printf("[API] 查询到 %d 个邮箱\n", len(mailboxes))
-	return c.JSON(mailboxes)
+	fmt.Printf("[API] 查询到 %d 个邮箱 (domain: %s, page: %d)\n", len(mailboxes), domain, page)
+	return c.JSON(fiber.Map{
+		"mailboxes": mailboxes,
+		"total":     total,
+		"page":      page,
+		"limit":     limit,
+	})
 }
 
 // GetSSEManager 返回全局 SSE 管理器，供 SMTP 服务器调用
 func GetSSEManager() *SSEManager {
 	return sseManager
+}
+
+func deleteMailbox(c *fiber.Ctx) error {
+	id := c.Params("id")
+
+	idInt, err := strconv.Atoi(id)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "无效的ID"})
+	}
+
+	var mailbox model.Mailbox
+	if err := db.DB.First(&mailbox, idInt).Error; err != nil {
+		return c.Status(404).JSON(fiber.Map{"error": "邮箱不存在"})
+	}
+
+	result := db.DB.Where("to_addr = ?", mailbox.Address).Delete(&model.Email{})
+	if result.Error != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "删除邮件失败"})
+	}
+	emailCount := result.RowsAffected
+
+	if err := db.DB.Delete(&mailbox).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "删除邮箱记录失败"})
+	}
+
+	fmt.Printf("[API] 删除邮箱 %s，共删除 %d 封邮件\n", mailbox.Address, emailCount)
+	return c.JSON(fiber.Map{
+		"message":     "删除成功",
+		"email_count": emailCount,
+	})
+}
+
+func deleteMailboxesByDomain(c *fiber.Ctx) error {
+	domain := c.Params("domain")
+
+	var mailboxes []model.Mailbox
+	if err := db.DB.Where("domain = ?", domain).Find(&mailboxes).Error; err != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "查询邮箱失败"})
+	}
+
+	if len(mailboxes) == 0 {
+		return c.JSON(fiber.Map{
+			"message":       "没有邮箱需要删除",
+			"mailbox_count": 0,
+			"email_count":   0,
+		})
+	}
+
+	var totalEmails int64 = 0
+	for _, mailbox := range mailboxes {
+		result := db.DB.Where("to_addr = ?", mailbox.Address).Delete(&model.Email{})
+		if result.Error != nil {
+			fmt.Printf("[API] 删除邮箱 %s 的邮件失败: %v\n", mailbox.Address, result.Error)
+			continue
+		}
+		totalEmails += result.RowsAffected
+	}
+
+	result := db.DB.Where("domain = ?", domain).Delete(&model.Mailbox{})
+	if result.Error != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "删除邮箱记录失败"})
+	}
+
+	fmt.Printf("[API] 删除域名 %s 下的 %d 个邮箱，共删除 %d 封邮件\n", domain, len(mailboxes), totalEmails)
+	return c.JSON(fiber.Map{
+		"message":       "删除成功",
+		"mailbox_count": len(mailboxes),
+		"email_count":   totalEmails,
+	})
 }
