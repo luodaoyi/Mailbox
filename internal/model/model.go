@@ -18,7 +18,7 @@ type Email struct {
 	HtmlBody    string       `gorm:"type:text"`
 	RawData     []byte       `gorm:"type:longblob"`
 	ReceivedAt  time.Time    `gorm:"index;autoCreateTime"`
-	Attachments []Attachment `gorm:"foreignKey:EmailID"`
+	Attachments []Attachment `gorm:"foreignKey:EmailID;constraint:OnDelete:CASCADE"`
 }
 
 type Attachment struct {

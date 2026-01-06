@@ -3,6 +3,7 @@ package api
 import (
 	"bufio"
 	"embed"
+	"fmt"
 	"io/fs"
 	"strconv"
 	"strings"
@@ -43,6 +44,7 @@ func (m *SSEManager) register(email string, client *sseClient) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.clients[email] = append(m.clients[email], client)
+	fmt.Printf("[SSE] 客户端已注册: %s (总数: %d)\n", email, len(m.clients[email]))
 }
 
 func (m *SSEManager) unregister(email string, client *sseClient) {
@@ -59,21 +61,26 @@ func (m *SSEManager) unregister(email string, client *sseClient) {
 	if len(m.clients[email]) == 0 {
 		delete(m.clients, email)
 	}
+	fmt.Printf("[SSE] 客户端已注销: %s (剩余: %d)\n", email, len(m.clients[email]))
 }
 
 func (m *SSEManager) NotifyNewEmail(toAddr string, email *model.Email) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
+	fmt.Printf("[SSE] 通知新邮件: %s (客户端数: %d)\n", toAddr, len(m.clients[toAddr]))
+
 	data := []byte("data: {\"ID\":" + strconv.FormatUint(uint64(email.ID), 10) +
 		",\"FromAddr\":\"" + email.FromAddr +
 		"\",\"Subject\":\"" + email.Subject +
 		"\",\"ReceivedAt\":\"" + email.ReceivedAt.Format(time.RFC3339) + "\"}\n\n")
 
-	for _, client := range m.clients[toAddr] {
+	for i, client := range m.clients[toAddr] {
 		select {
 		case client.ch <- data:
+			fmt.Printf("[SSE] 消息已发送到客户端 %d\n", i)
 		default:
+			fmt.Printf("[SSE] 客户端 %d 通道已满，跳过\n", i)
 		}
 	}
 }
@@ -89,6 +96,7 @@ func SetupApp(webFS embed.FS) *fiber.App {
 		api.Get("/emails", authMiddleware(false), getEmails)
 		api.Get("/emails/stream", authMiddleware(false), emailStream)
 		api.Get("/emails/:id", authMiddleware(false), getEmailDetail)
+		api.Delete("/emails/:id", authMiddleware(false), deleteEmail)
 		api.Get("/attachments/:id", authMiddleware(false), getAttachment)
 
 		admin := api.Group("/admin")
@@ -182,11 +190,12 @@ func authMiddleware(requireAdmin bool) fiber.Handler {
 
 func emailStream(c *fiber.Ctx) error {
 	email := c.Locals("email").(string)
+	fmt.Printf("[SSE] 新的 SSE 连接请求: %s\n", email)
 
 	c.Set("Content-Type", "text/event-stream")
 	c.Set("Cache-Control", "no-cache")
 	c.Set("Connection", "keep-alive")
-	c.Set("Transfer-Encoding", "chunked")
+	c.Set("X-Accel-Buffering", "no")
 
 	client := &sseClient{
 		email: email,
@@ -194,25 +203,39 @@ func emailStream(c *fiber.Ctx) error {
 	}
 
 	sseManager.register(email, client)
-	defer sseManager.unregister(email, client)
 
 	c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
-		w.Write([]byte(": connected\n\n"))
-		w.Flush()
+		defer sseManager.unregister(email, client)
+
+		if _, err := w.WriteString(": connected\n\n"); err != nil {
+			return
+		}
+		if err := w.Flush(); err != nil {
+			return
+		}
 
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 
 		for {
 			select {
-			case data := <-client.ch:
-				w.Write(data)
-				w.Flush()
+			case data, ok := <-client.ch:
+				if !ok {
+					return
+				}
+				if _, err := w.Write(data); err != nil {
+					return
+				}
+				if err := w.Flush(); err != nil {
+					return
+				}
 			case <-ticker.C:
-				w.Write([]byte(": ping\n\n"))
-				w.Flush()
-			case <-c.Context().Done():
-				return
+				if _, err := w.WriteString(": ping\n\n"); err != nil {
+					return
+				}
+				if err := w.Flush(); err != nil {
+					return
+				}
 			}
 		}
 	})
@@ -302,6 +325,26 @@ func getEmailDetail(c *fiber.Ctx) error {
 		"received_at": emailData.ReceivedAt,
 		"attachments": attachments,
 	})
+}
+
+func deleteEmail(c *fiber.Ctx) error {
+	email := c.Locals("email").(string)
+	id := c.Params("id")
+
+	idInt, err := strconv.Atoi(id)
+	if err != nil {
+		return c.Status(400).JSON(fiber.Map{"error": "无效的ID"})
+	}
+
+	result := db.DB.Where("id = ? AND to_addr = ?", idInt, email).Delete(&model.Email{})
+	if result.Error != nil {
+		return c.Status(500).JSON(fiber.Map{"error": "删除失败"})
+	}
+	if result.RowsAffected == 0 {
+		return c.Status(404).JSON(fiber.Map{"error": "邮件不存在"})
+	}
+
+	return c.JSON(fiber.Map{"message": "删除成功"})
 }
 
 func getAttachment(c *fiber.Ctx) error {

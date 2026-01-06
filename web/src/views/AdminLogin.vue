@@ -13,6 +13,9 @@
         </button>
       </form>
       <p v-if="error" class="mt-4 text-red-500 text-center">{{ error }}</p>
+      <p class="mt-6 text-center text-gray-500 text-sm">
+        <router-link to="/" class="text-blue-500 hover:underline">返回邮箱登录</router-link>
+      </p>
     </div>
   </div>
 </template>

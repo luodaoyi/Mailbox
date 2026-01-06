@@ -2,7 +2,10 @@
   <div class="max-w-4xl mx-auto p-4">
     <div class="flex justify-between items-center mb-6">
       <h1 class="text-2xl font-bold">域名管理</h1>
-      <button @click="logout" class="px-4 py-2 text-gray-600 hover:text-gray-800">退出</button>
+      <div class="flex gap-4">
+        <router-link to="/inbox" class="px-4 py-2 text-blue-600 hover:text-blue-800">邮件列表</router-link>
+        <button @click="logout" class="px-4 py-2 text-gray-600 hover:text-gray-800">退出</button>
+      </div>
     </div>
     <div class="mb-4 flex gap-2">
       <input v-model="newDomain" type="text" placeholder="输入域名 (如 cc.com)"
@@ -85,5 +88,12 @@ const logout = () => {
   router.push('/admin')
 }
 
-onMounted(loadDomains)
+onMounted(() => {
+  const token = localStorage.getItem('token')
+  if (!token) {
+    router.push('/admin')
+    return
+  }
+  loadDomains()
+})
 </script>

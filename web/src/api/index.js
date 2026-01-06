@@ -12,8 +12,11 @@ api.interceptors.response.use(
   res => res.data,
   err => {
     if (err.response?.status === 401) {
-      localStorage.removeItem('token')
-      location.href = '/'
+      const token = localStorage.getItem('token')
+      if (token) {
+        localStorage.removeItem('token')
+        location.href = '/'
+      }
     }
     return Promise.reject(err)
   }
@@ -24,6 +27,7 @@ export default {
   getEmails: () => api.get('/emails'),
   getEmail: id => api.get(`/emails/${id}`),
   getAttachment: id => `/api/attachments/${id}`,
+  deleteEmail: id => api.delete(`/emails/${id}`),
 
   adminLogin: (username, password) => api.post('/admin/login', { username, password }),
   getDomains: () => api.get('/admin/domains'),
