@@ -42,7 +42,16 @@
       </div>
       <!-- 右侧邮件详情 -->
       <div class="flex-1 bg-gray-50 overflow-y-auto">
-        <div v-if="!selectedEmail" class="flex items-center justify-center h-full text-gray-500">
+        <div v-if="detailLoading" class="flex items-center justify-center h-full">
+          <div class="text-gray-500">
+            <svg class="animate-spin h-8 w-8 mx-auto mb-2" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <p>加载中...</p>
+          </div>
+        </div>
+        <div v-else-if="!selectedEmail" class="flex items-center justify-center h-full text-gray-500">
           选择一封邮件查看详情
         </div>
         <div v-else class="bg-white m-4 rounded-lg shadow p-6">
@@ -81,6 +90,7 @@ const email = ref('')
 const emails = ref([])
 const selectedEmail = ref(null)
 const loading = ref(true)
+const detailLoading = ref(false)
 const page = ref(1)
 const limit = ref(50)
 const total = ref(0)
@@ -95,6 +105,7 @@ const formatSize = s => s < 1024 ? s + 'B' : s < 1048576 ? (s / 1024).toFixed(1)
 const prevPage = () => {
   if (page.value > 1) {
     page.value--
+    loading.value = true
     loadEmails()
   }
 }
@@ -102,6 +113,7 @@ const prevPage = () => {
 const nextPage = () => {
   if (page.value < totalPages.value) {
     page.value++
+    loading.value = true
     loadEmails()
   }
 }
@@ -114,10 +126,13 @@ const logout = () => {
 }
 
 const selectEmail = async (e) => {
+  detailLoading.value = true
   try {
     selectedEmail.value = await api.getEmail(e.ID)
   } catch (err) {
     console.error(err)
+  } finally {
+    detailLoading.value = false
   }
 }
 
@@ -187,6 +202,8 @@ const loadEmails = async () => {
     console.error(e)
     emails.value = []
     total.value = 0
+  } finally {
+    loading.value = false
   }
 }
 

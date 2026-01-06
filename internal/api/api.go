@@ -13,6 +13,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 	"mailbox/internal/db"
 	"mailbox/internal/model"
 )
@@ -315,7 +316,9 @@ func getEmailDetail(c *fiber.Ctx) error {
 	id := c.Params("id")
 
 	var emailData model.Email
-	if err := db.DB.Preload("Attachments").Where("id = ? AND to_addr = ?", id, email).First(&emailData).Error; err != nil {
+	if err := db.DB.Select("id", "from_addr", "to_addr", "subject", "body", "html_body", "received_at").Preload("Attachments", func(db *gorm.DB) *gorm.DB {
+		return db.Select("id", "email_id", "filename", "content_type", "size")
+	}).Where("id = ? AND to_addr = ?", id, email).First(&emailData).Error; err != nil {
 		return c.Status(404).JSON(fiber.Map{"error": "邮件不存在"})
 	}
 
