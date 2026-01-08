@@ -2,9 +2,7 @@ version: '3.8'
 
 services:
   mailbox:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/luodaoyi/mailbox:latest
     ports:
       - "8080:8080"
       - "25:25"

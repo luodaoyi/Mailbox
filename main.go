@@ -4,6 +4,7 @@ import (
 	"embed"
 	"fmt"
 	"log"
+	"os"
 
 	"mailbox/internal/api"
 	"mailbox/internal/config"
@@ -20,6 +21,11 @@ func main() {
 		log.Fatalf("加载配置失败: %v", err)
 	}
 
+	jwtSecret := os.Getenv("JWT_SECRET")
+	if jwtSecret == "" {
+		log.Fatal("启动失败: 必须设置 JWT_SECRET 环境变量")
+	}
+
 	if err := db.Init(&cfg.Database, &cfg.Admin); err != nil {
 		log.Fatalf("初始化数据库失败: %v", err)
 	}
@@ -31,7 +37,7 @@ func main() {
 		}
 	}()
 
-	app := api.SetupApp(webDist)
+	app := api.SetupApp(webDist, jwtSecret)
 	log.Printf("HTTP 服务器启动在端口 %d", cfg.Server.HTTPPort)
 	if err := app.Listen(fmt.Sprintf(":%d", cfg.Server.HTTPPort)); err != nil {
 		log.Fatalf("HTTP 服务器启动失败: %v", err)

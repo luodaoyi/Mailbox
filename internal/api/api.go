@@ -18,7 +18,7 @@ import (
 	"mailbox/internal/model"
 )
 
-const jwtSecret = "mailbox-secret-key-change-in-production"
+var jwtSecret string
 
 type Claims struct {
 	Email   string `json:"email"`
@@ -86,7 +86,8 @@ func (m *SSEManager) NotifyNewEmail(toAddr string, email *model.Email) {
 	}
 }
 
-func SetupApp(webFS embed.FS) *fiber.App {
+func SetupApp(webFS embed.FS, secret string) *fiber.App {
+	jwtSecret = secret
 	app := fiber.New(fiber.Config{
 		DisableStartupMessage: true,
 	})
