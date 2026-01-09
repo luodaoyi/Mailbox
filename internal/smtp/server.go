@@ -1,4 +1,4 @@
-﻿package smtp
+package smtp
 
 import (
 	"bytes"
@@ -10,6 +10,7 @@ import (
 	"github.com/emersion/go-smtp"
 	"github.com/jhillyerd/enmime"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"mailbox/internal/api"
 	"mailbox/internal/db"
 	"mailbox/internal/model"
@@ -148,7 +149,10 @@ func upsertMailboxTx(tx *gorm.DB, address string, receivedAt time.Time) error {
 		EmailCount: 0,
 		LastEmail:  receivedAt,
 	}
-	if err := tx.Where("address = ?", address).FirstOrCreate(&mailbox, mailbox).Error; err != nil {
+	if err := tx.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "address"}},
+		DoNothing: true,
+	}).Create(&mailbox).Error; err != nil {
 		return err
 	}
 
@@ -177,10 +181,14 @@ func (s *Session) Logout() error {
 }
 
 func Start(port int) error {
+	return newServer(port).ListenAndServe()
+}
+
+func newServer(port int) *smtp.Server {
 	be := &Backend{}
 	s := smtp.NewServer(be)
 	s.Addr = fmt.Sprintf(":%d", port)
 	s.Domain = "localhost"
 	s.AllowInsecureAuth = true
-	return s.ListenAndServe()
+	return s
 }

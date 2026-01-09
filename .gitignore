@@ -22,6 +22,10 @@ dist/
 .DS_Store
 *.local
 
+# Test embed assets
+!internal/api/web/dist/
+!internal/api/web/dist/index.html
+
 # IDE
 .vscode/
 .idea/
