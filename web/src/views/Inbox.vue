@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="h-screen flex flex-col">
     <div class="bg-white border-b px-6 py-4 flex justify-between items-center">
       <h1 class="text-xl font-bold">收件箱 - {{ email }}</h1>
@@ -76,8 +76,27 @@
             </div>
           </div>
           <div class="border-t pt-4">
-            <div v-if="selectedEmail.html_body" v-html="selectedEmail.html_body" class="prose max-w-none"></div>
-            <pre v-else class="whitespace-pre-wrap">{{ selectedEmail.body }}</pre>
+            <div v-if="selectedEmail.html_body" class="mb-3 flex gap-2">
+              <button
+                @click="viewMode = 'text'"
+                :class="['px-3 py-1 text-sm rounded', viewMode === 'text' ? 'bg-gray-700 text-white' : 'bg-gray-200 text-gray-700']"
+              >
+                纯文本
+              </button>
+              <button
+                @click="viewMode = 'html'"
+                :class="['px-3 py-1 text-sm rounded', viewMode === 'html' ? 'bg-gray-700 text-white' : 'bg-gray-200 text-gray-700']"
+              >
+                HTML
+              </button>
+            </div>
+            <pre v-if="viewMode === 'text'" class="whitespace-pre-wrap">{{ selectedEmail.body || '(无正文)' }}</pre>
+            <iframe
+              v-else
+              class="w-full h-[600px] border rounded"
+              sandbox
+              :srcdoc="selectedEmail.html_body"
+            ></iframe>
           </div>
         </div>
       </div>
@@ -127,6 +146,7 @@ const route = useRoute()
 const email = ref('')
 const emails = ref([])
 const selectedEmail = ref(null)
+const viewMode = ref('text')
 const loading = ref(true)
 const detailLoading = ref(false)
 const refreshing = ref(false)
@@ -212,6 +232,7 @@ const selectEmail = async (e) => {
   detailLoading.value = true
   try {
     selectedEmail.value = await api.getEmail(email.value, e.ID)
+    viewMode.value = 'text'
   } catch (err) {
     console.error(err)
   } finally {

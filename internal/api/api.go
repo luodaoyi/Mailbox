@@ -1,10 +1,13 @@
-package api
+﻿package api
 
 import (
 	"bufio"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
+	"mime"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,7 +21,13 @@ import (
 	"mailbox/internal/model"
 )
 
-var jwtSecret string
+var (
+	jwtSecret         string
+	errNotFound       = errors.New("record not found")
+	errNoEmails       = errors.New("no emails")
+	errDomainNotEmpty = errors.New("domain not empty")
+	errNoMailboxes    = errors.New("no mailboxes")
+)
 
 type Claims struct {
 	Email   string `json:"email"`
@@ -158,6 +167,21 @@ func getContentType(path string) string {
 		return "application/json"
 	}
 	return "application/octet-stream"
+}
+
+func sanitizeFilename(name string) string {
+	name = strings.ReplaceAll(name, "\r", "")
+	name = strings.ReplaceAll(name, "\n", "")
+	name = strings.ReplaceAll(name, "\x00", "")
+	name = strings.ReplaceAll(name, "/", "\\")
+	name = filepath.Base(name)
+	name = strings.TrimSpace(name)
+	if name == "" || name == "." || name == ".." {
+		return "attachment"
+	}
+	name = strings.ReplaceAll(name, "\\", "_")
+	name = strings.ReplaceAll(name, ":", "_")
+	return name
 }
 
 func authMiddleware(requireAdmin bool) fiber.Handler {
@@ -364,22 +388,35 @@ func getEmailDetail(c *fiber.Ctx) error {
 	})
 }
 
-func cleanupMailbox(email string) {
+func cleanupMailboxTx(tx *gorm.DB, email string) error {
 	var count int64
-	db.DB.Model(&model.Email{}).Where("to_addr = ?", email).Count(&count)
+	if err := tx.Model(&model.Email{}).Where("to_addr = ?", email).Count(&count).Error; err != nil {
+		return err
+	}
 	if count == 0 {
-		db.DB.Where("address = ?", email).Delete(&model.Mailbox{})
+		if err := tx.Where("address = ?", email).Delete(&model.Mailbox{}).Error; err != nil {
+			return err
+		}
 	} else {
 		var mailbox model.Mailbox
-		if err := db.DB.Where("address = ?", email).First(&mailbox).Error; err == nil {
+		if err := tx.Where("address = ?", email).First(&mailbox).Error; err == nil {
 			var lastEmail model.Email
-			db.DB.Where("to_addr = ?", email).Order("received_at DESC").First(&lastEmail)
-			db.DB.Model(&mailbox).Updates(map[string]interface{}{
+			if err := tx.Where("to_addr = ?", email).Order("received_at DESC").First(&lastEmail).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&mailbox).Updates(map[string]interface{}{
 				"email_count": count,
 				"last_email":  lastEmail.ReceivedAt,
-			})
+			}).Error; err != nil {
+				return err
+			}
 		}
 	}
+	return nil
+}
+
+func cleanupMailbox(email string) {
+	_ = cleanupMailboxTx(db.DB, email)
 }
 
 func deleteEmail(c *fiber.Ctx) error {
@@ -394,15 +431,22 @@ func deleteEmail(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "无效的ID"})
 	}
 
-	result := db.DB.Where("id = ? AND to_addr = ?", idInt, email).Delete(&model.Email{})
-	if result.Error != nil {
+	if err := db.DB.Transaction(func(tx *gorm.DB) error {
+		result := tx.Where("id = ? AND to_addr = ?", idInt, email).Delete(&model.Email{})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return errNotFound
+		}
+		return cleanupMailboxTx(tx, email)
+	}); err != nil {
+		if errors.Is(err, errNotFound) {
+			return c.Status(404).JSON(fiber.Map{"error": "邮件不存在"})
+		}
 		return c.Status(500).JSON(fiber.Map{"error": "删除失败"})
 	}
-	if result.RowsAffected == 0 {
-		return c.Status(404).JSON(fiber.Map{"error": "邮件不存在"})
-	}
 
-	cleanupMailbox(email)
 	return c.JSON(fiber.Map{"message": "删除成功"})
 }
 
@@ -422,22 +466,31 @@ func deletePageEmails(c *fiber.Ctx) error {
 	}
 	offset := (page - 1) * limit
 
-	var emailIDs []uint
-	if err := db.DB.Model(&model.Email{}).Where("to_addr = ?", email).Order("received_at DESC").Limit(limit).Offset(offset).Pluck("id", &emailIDs).Error; err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "查询失败"})
+	var deleted int64
+	if err := db.DB.Transaction(func(tx *gorm.DB) error {
+		var emailIDs []uint
+		if err := tx.Model(&model.Email{}).Where("to_addr = ?", email).Order("received_at DESC").Limit(limit).Offset(offset).Pluck("id", &emailIDs).Error; err != nil {
+			return err
+		}
+
+		if len(emailIDs) == 0 {
+			return errNoEmails
+		}
+
+		result := tx.Where("id IN ?", emailIDs).Where("to_addr = ?", email).Delete(&model.Email{})
+		if result.Error != nil {
+			return result.Error
+		}
+		deleted = result.RowsAffected
+		return cleanupMailboxTx(tx, email)
+	}); err != nil {
+		if errors.Is(err, errNoEmails) {
+			return c.JSON(fiber.Map{"message": "没有邮件可删除", "count": 0})
+		}
+		return c.Status(500).JSON(fiber.Map{"error": "删除失败"})
 	}
 
-	if len(emailIDs) == 0 {
-		return c.JSON(fiber.Map{"message": "没有邮件可删除", "count": 0})
-	}
-
-	result := db.DB.Where("id IN (?)", emailIDs).Where("to_addr = ?", email).Delete(&model.Email{})
-	if result.Error != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "删除失败: " + result.Error.Error()})
-	}
-
-	cleanupMailbox(email)
-	return c.JSON(fiber.Map{"message": "删除成功", "count": result.RowsAffected})
+	return c.JSON(fiber.Map{"message": "删除成功", "count": deleted})
 }
 
 func deleteMonthEmails(c *fiber.Ctx) error {
@@ -450,13 +503,19 @@ func deleteMonthEmails(c *fiber.Ctx) error {
 	startOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
 	endOfMonth := startOfMonth.AddDate(0, 1, 0)
 
-	result := db.DB.Where("to_addr = ? AND received_at >= ? AND received_at < ?", email, startOfMonth, endOfMonth).Delete(&model.Email{})
-	if result.Error != nil {
+	var deleted int64
+	if err := db.DB.Transaction(func(tx *gorm.DB) error {
+		result := tx.Where("to_addr = ? AND received_at >= ? AND received_at < ?", email, startOfMonth, endOfMonth).Delete(&model.Email{})
+		if result.Error != nil {
+			return result.Error
+		}
+		deleted = result.RowsAffected
+		return cleanupMailboxTx(tx, email)
+	}); err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "删除失败"})
 	}
 
-	cleanupMailbox(email)
-	return c.JSON(fiber.Map{"message": "删除成功", "count": result.RowsAffected})
+	return c.JSON(fiber.Map{"message": "删除成功", "count": deleted})
 }
 
 func deleteAllEmails(c *fiber.Ctx) error {
@@ -465,13 +524,19 @@ func deleteAllEmails(c *fiber.Ctx) error {
 		return c.Status(400).JSON(fiber.Map{"error": "email parameter required"})
 	}
 
-	result := db.DB.Where("to_addr = ?", email).Delete(&model.Email{})
-	if result.Error != nil {
+	var deleted int64
+	if err := db.DB.Transaction(func(tx *gorm.DB) error {
+		result := tx.Where("to_addr = ?", email).Delete(&model.Email{})
+		if result.Error != nil {
+			return result.Error
+		}
+		deleted = result.RowsAffected
+		return cleanupMailboxTx(tx, email)
+	}); err != nil {
 		return c.Status(500).JSON(fiber.Map{"error": "删除失败"})
 	}
 
-	cleanupMailbox(email)
-	return c.JSON(fiber.Map{"message": "删除成功", "count": result.RowsAffected})
+	return c.JSON(fiber.Map{"message": "删除成功", "count": deleted})
 }
 
 func getAttachment(c *fiber.Ctx) error {
@@ -488,7 +553,13 @@ func getAttachment(c *fiber.Ctx) error {
 		return c.Status(404).JSON(fiber.Map{"error": "附件不存在"})
 	}
 
-	c.Set("Content-Disposition", "attachment; filename="+att.Filename)
+	safeName := sanitizeFilename(att.Filename)
+	disposition := "attachment"
+	if safeName != "" {
+		disposition = mime.FormatMediaType("attachment", map[string]string{"filename": safeName})
+	}
+	c.Set("Content-Disposition", disposition)
+	c.Set("X-Content-Type-Options", "nosniff")
 	c.Set("Content-Type", att.ContentType)
 	return c.Send(att.Data)
 }
@@ -586,18 +657,31 @@ func deleteDomain(c *fiber.Ctx) error {
 	}
 
 	var domain model.Domain
-	if err := db.DB.First(&domain, idInt).Error; err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": "域名不存在"})
-	}
-
-	// 检查该域名下是否有邮箱
 	var mailboxCount int64
-	db.DB.Model(&model.Mailbox{}).Where("domain = ?", domain.Domain).Count(&mailboxCount)
-	if mailboxCount > 0 {
-		return c.Status(400).JSON(fiber.Map{"error": fmt.Sprintf("该域名下还有 %d 个邮箱，请先删除所有邮箱后再删除域名", mailboxCount)})
-	}
+	if err := db.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.First(&domain, idInt).Error; err != nil {
+			return errNotFound
+		}
 
-	if err := db.DB.Delete(&domain).Error; err != nil {
+		// 检查该域名下是否有邮箱
+		if err := tx.Model(&model.Mailbox{}).Where("domain = ?", domain.Domain).Count(&mailboxCount).Error; err != nil {
+			return err
+		}
+		if mailboxCount > 0 {
+			return errDomainNotEmpty
+		}
+
+		if err := tx.Delete(&domain).Error; err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		if errors.Is(err, errNotFound) {
+			return c.Status(404).JSON(fiber.Map{"error": "域名不存在"})
+		}
+		if errors.Is(err, errDomainNotEmpty) {
+			return c.Status(400).JSON(fiber.Map{"error": fmt.Sprintf("该域名下还有 %d 个邮箱，请先删除所有邮箱后再删除域名", mailboxCount)})
+		}
 		return c.Status(500).JSON(fiber.Map{"error": "删除失败"})
 	}
 
@@ -652,18 +736,27 @@ func deleteMailbox(c *fiber.Ctx) error {
 	}
 
 	var mailbox model.Mailbox
-	if err := db.DB.First(&mailbox, idInt).Error; err != nil {
-		return c.Status(404).JSON(fiber.Map{"error": "邮箱不存在"})
-	}
+	var emailCount int64
+	if err := db.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.First(&mailbox, idInt).Error; err != nil {
+			return errNotFound
+		}
 
-	result := db.DB.Where("to_addr = ?", mailbox.Address).Delete(&model.Email{})
-	if result.Error != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "删除邮件失败"})
-	}
-	emailCount := result.RowsAffected
+		result := tx.Where("to_addr = ?", mailbox.Address).Delete(&model.Email{})
+		if result.Error != nil {
+			return result.Error
+		}
+		emailCount = result.RowsAffected
 
-	if err := db.DB.Delete(&mailbox).Error; err != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "删除邮箱记录失败"})
+		if err := tx.Delete(&mailbox).Error; err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		if errors.Is(err, errNotFound) {
+			return c.Status(404).JSON(fiber.Map{"error": "邮箱不存在"})
+		}
+		return c.Status(500).JSON(fiber.Map{"error": "删除失败"})
 	}
 
 	fmt.Printf("[API] 删除邮箱 %s，共删除 %d 封邮件\n", mailbox.Address, emailCount)
@@ -676,33 +769,46 @@ func deleteMailbox(c *fiber.Ctx) error {
 func deleteMailboxesByDomain(c *fiber.Ctx) error {
 	domain := c.Params("domain")
 
-	// 先统计数量
 	var mailboxCount int64
-	db.DB.Model(&model.Mailbox{}).Where("domain = ?", domain).Count(&mailboxCount)
+	var emailCount int64
+	if err := db.DB.Transaction(func(tx *gorm.DB) error {
+		// 先统计数量
+		if err := tx.Model(&model.Mailbox{}).Where("domain = ?", domain).Count(&mailboxCount).Error; err != nil {
+			return err
+		}
 
-	if mailboxCount == 0 {
-		return c.JSON(fiber.Map{
-			"message":       "没有邮箱需要删除",
-			"mailbox_count": 0,
-			"email_count":   0,
-		})
-	}
+		if mailboxCount == 0 {
+			return errNoMailboxes
+		}
 
-	// 获取该域名下所有邮箱地址
-	var addresses []string
-	db.DB.Model(&model.Mailbox{}).Where("domain = ?", domain).Pluck("address", &addresses)
+		// 获取该域名下所有邮箱地址
+		var addresses []string
+		if err := tx.Model(&model.Mailbox{}).Where("domain = ?", domain).Pluck("address", &addresses).Error; err != nil {
+			return err
+		}
 
-	// 使用单个DELETE语句删除所有邮件
-	result := db.DB.Where("to_addr IN ?", addresses).Delete(&model.Email{})
-	if result.Error != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "删除邮件失败"})
-	}
-	emailCount := result.RowsAffected
+		// 使用单个DELETE语句删除所有邮件
+		result := tx.Where("to_addr IN ?", addresses).Delete(&model.Email{})
+		if result.Error != nil {
+			return result.Error
+		}
+		emailCount = result.RowsAffected
 
-	// 使用单个DELETE语句删除所有邮箱记录
-	result = db.DB.Where("domain = ?", domain).Delete(&model.Mailbox{})
-	if result.Error != nil {
-		return c.Status(500).JSON(fiber.Map{"error": "删除邮箱记录失败"})
+		// 使用单个DELETE语句删除所有邮箱记录
+		result = tx.Where("domain = ?", domain).Delete(&model.Mailbox{})
+		if result.Error != nil {
+			return result.Error
+		}
+		return nil
+	}); err != nil {
+		if errors.Is(err, errNoMailboxes) {
+			return c.JSON(fiber.Map{
+				"message":       "没有邮箱需要删除",
+				"mailbox_count": 0,
+				"email_count":   0,
+			})
+		}
+		return c.Status(500).JSON(fiber.Map{"error": "删除失败"})
 	}
 
 	fmt.Printf("[API] 删除域名 %s 下的 %d 个邮箱，共删除 %d 封邮件\n", domain, mailboxCount, emailCount)
