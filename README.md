@@ -36,7 +36,32 @@
 
 ## 📦 快速开始
 
-### 使用 Docker Compose（推荐）
+### 一键部署（无需克隆项目）
+
+只需一条命令即可完成部署，脚本会自动下载所需文件并使用预构建镜像启动服务：
+
+```bash
+# 推荐：先下载脚本查看内容，再执行
+curl -fsSL https://raw.githubusercontent.com/luodaoyi/Mailbox/main/deploy.sh -o deploy.sh
+cat deploy.sh   # 查看脚本内容
+bash deploy.sh
+```
+
+或直接一键执行：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/luodaoyi/Mailbox/main/deploy.sh | bash
+```
+
+部署完成后访问 http://localhost:8080
+
+默认管理员账号：
+- 用户名：`admin`
+- 密码：`admin123`（请在 `mailbox-deploy/.env` 中修改）
+
+> 脚本会在当前目录创建 `mailbox-deploy/` 文件夹，所有配置和数据均存放于此。
+
+### 使用 Docker Compose（克隆项目）
 
 ```bash
 # 克隆项目
@@ -128,6 +153,18 @@ admin:
 ```
 
 ## 🐳 Docker 部署
+
+### 一键部署（推荐，无需克隆项目）
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/luodaoyi/Mailbox/main/deploy.sh | bash
+```
+
+自定义部署目录：
+
+```bash
+MAILBOX_DEPLOY_DIR=/opt/mailbox bash <(curl -fsSL https://raw.githubusercontent.com/luodaoyi/Mailbox/main/deploy.sh)
+```
 
 ### 构建镜像
 
