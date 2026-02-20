@@ -3,9 +3,9 @@ set -e
 
 # MailBox 一键部署脚本
 # 无需克隆项目，自动下载所需文件并使用预构建 Docker 镜像部署
-# 用法: curl -fsSL https://raw.githubusercontent.com/luodaoyi/Mailbox/main/deploy.sh | bash
+# 用法: curl -fsSL https://raw.githubusercontent.com/luodaoyi/Mailbox/master/deploy.sh | bash
 
-REPO_RAW="https://raw.githubusercontent.com/luodaoyi/Mailbox/main"
+REPO_RAW="https://raw.githubusercontent.com/luodaoyi/Mailbox/master"
 DEPLOY_DIR="${MAILBOX_DEPLOY_DIR:-./mailbox-deploy}"
 IMAGE="ghcr.io/luodaoyi/mailbox:latest"
 
@@ -37,13 +37,6 @@ check_deps() {
 # 生成随机字母数字字符串（避免特殊字符导致 shell/YAML 解析问题）
 gen_secret() {
     LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32
-}
-
-# 下载初始化 SQL
-download_init_sql() {
-    info "下载数据库初始化文件..."
-    curl -fsSL "${REPO_RAW}/init.sql" -o "${DEPLOY_DIR}/init.sql" || \
-        error "下载 init.sql 失败，请检查网络连接"
 }
 
 # 创建 docker-compose.yml
@@ -83,7 +76,6 @@ services:
       - MYSQL_PASSWORD=\${DB_PASSWORD}
     volumes:
       - mysql_data:/var/lib/mysql
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p\${MYSQL_ROOT_PASSWORD}"]
@@ -145,7 +137,6 @@ main() {
     mkdir -p "${DEPLOY_DIR}"
     cd "${DEPLOY_DIR}"
 
-    download_init_sql
     create_compose_file
     create_env_file
 
